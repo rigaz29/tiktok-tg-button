@@ -1,8 +1,8 @@
 # TikTok Telegram Button
 
 A floating button added inside the TikTok Android app. Tap it on any video or photo
-post and the link is sent to a self-hosted [tikdl](https://github.com/rigaz29/tikdl)
-bot, which downloads the post and drops it into a Telegram group. No copy-paste, no
+post and the link is sent to a self-hosted [tikdl](tikdl/) bot (bundled in this repo
+under `tikdl/`), which downloads the post and drops it into a Telegram group. No copy-paste, no
 leaving the app.
 
 The button is a small Java module (`com.rigaz.tgbtn`) injected into a repackaged
@@ -27,12 +27,12 @@ the canonical web link, and POSTs it to the bot over a signed HTTP request.
                             X-Signature)                                  + caption)
 ```
 
-Two halves:
+Two halves, both in this repo:
 
-- **This repo** is the client: the in-app button and the build tooling.
-- **[tikdl](https://github.com/rigaz29/tikdl)** is the server: a Telegram bot with an
-  HTTP intake endpoint. It holds the bot token and does the downloading. This repo
-  never sees the bot token.
+- the **client** (repo root): the in-app button and the build tooling.
+- **[tikdl/](tikdl/)** is the server: a Telegram bot with an HTTP intake endpoint. It
+  holds the bot token in its own `.env` (gitignored, never committed) and does the
+  downloading. The APK never sees the bot token.
 
 ### Why the request can be plain HTTP
 
@@ -41,7 +41,7 @@ The phone and the server share a secret (`SECRET` in `tg.properties`,
 `HMAC-SHA256(secret, "<timestamp>.<body>")` and sends `X-Timestamp` / `X-Signature`.
 The secret itself never goes on the wire, so TLS is not required to keep it safe. The
 server rejects anything unsigned, outside a 5-minute window, or replayed. See
-`Submit.java` here and the HTTP-intake section of tikdl's README for the matching
+`Submit.java` here and the HTTP-intake section of `tikdl/CLAUDE.md` for the matching
 verification.
 
 ## Repo layout
@@ -66,6 +66,10 @@ build.sh              builds a modified APK end to end (see "Build — raw route
 tg.properties.example copy to tg.properties and fill in SERVER_URL + SECRET.
 testapp/              a tiny mock app with stub Aweme / User / VerticalViewPager classes,
                       to exercise the locator/reader logic without TikTok.
+
+tikdl/                the server: the Telegram bot and its signed HTTP intake. Runs on
+                      your VPS, holds the bot token in tikdl/.env (gitignored). See
+                      tikdl/CLAUDE.md for its architecture and setup.
 ```
 
 ## Configuration

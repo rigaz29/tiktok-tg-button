@@ -10,6 +10,13 @@ tg.properties
 build/
 out/
 
+# Server (tikdl/) runtime secrets and deps — also covered by tikdl/.gitignore
+.env
+.env.local
+cookies.txt
+node_modules/
+*.log
+
 # OS / editor noise
 .DS_Store
 Thumbs.db
