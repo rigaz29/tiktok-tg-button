@@ -67,9 +67,17 @@ tg.properties.example copy to tg.properties and fill in SERVER_URL + SECRET.
 testapp/              a tiny mock app with stub Aweme / User / VerticalViewPager classes,
                       to exercise the locator/reader logic without TikTok.
 
-tikdl/                the server: the Telegram bot and its signed HTTP intake. Runs on
-                      your VPS, holds the bot token in tikdl/.env (gitignored). See
-                      tikdl/CLAUDE.md for its architecture and setup.
+tikdl/                the server, a git submodule -> github.com/rigaz29/tikdl: the
+                      Telegram bot and its signed HTTP intake. Runs on your VPS, holds
+                      the bot token in its own .env. See tikdl/CLAUDE.md for setup.
+```
+
+`tikdl/` is a git submodule, so clone with `--recursive`:
+
+```sh
+git clone --recursive https://github.com/rigaz29/tiktok-tg-button.git
+# already cloned? pull the submodule in with:
+git submodule update --init
 ```
 
 ## Configuration
