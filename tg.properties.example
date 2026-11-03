@@ -1,0 +1,10 @@
+# Copy this file to tg.properties and fill in your own values.
+# tg.properties is gitignored: it holds your private HMAC secret. Never commit it.
+
+# Base URL of your tikdl intake endpoint, no trailing slash.
+# Plain http is fine: the secret never goes on the wire (see the HMAC note in the README).
+SERVER_URL=http://VPS_IP:8787
+
+# Shared HMAC-SHA256 secret. Must be identical to INTAKE_SECRET in tikdl's .env on the server.
+# At least 32 characters. Generate one with:  openssl rand -hex 32
+SECRET=REPLACE_WITH_A_LONG_RANDOM_SECRET
