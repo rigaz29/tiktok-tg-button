@@ -14,45 +14,50 @@ import java.util.List;
 /**
  * Finds the Aweme that is on screen.
  *
- * TikTok 46.4.3 shows the feed (MainActivity) and opened videos (DetailActivity) through
- * BaseListFragmentPanel, which drives a com.ss.android.ugc.aweme.common.widget.VerticalViewPager.
- * Its base class X.12PR declares getAdapter()/getCurrentItem(), and the feed adapter X.0RYP has
- * public Aweme getItem(int). Those names survive obfuscation, so the lookup is
- * adapter.getItem(pager.getCurrentItem()) on the pager that covers the middle of the screen.
+ * TikTok 47.6.3 shows posts through pagers: a VerticalViewPager for the feed, and for stories a
+ * second pager inside the feed cell, whose class name is obfuscated. Every one of them has public
+ * getAdapter()/getCurrentItem(), and their adapters have public Aweme getItem(int), because those
+ * names survive obfuscation. So the lookup is adapter.getItem(pager.getCurrentItem()) on the
+ * innermost pager under the middle of the screen. Innermost matters: for a story the outer pager
+ * only yields the group, whose aid belongs to no post.
  * If no pager matches, the views under the middle of the screen are searched for an Aweme field.
  */
 final class AwemeLocator {
     private static final String AWEME = "com.ss.android.ugc.aweme.feed.model.Aweme";
-    private static final String PAGER = "com.ss.android.ugc.aweme.common.widget.VerticalViewPager";
 
     private AwemeLocator() {
     }
 
     static Object find(Activity activity) throws ClassNotFoundException {
-        ClassLoader cl = activity.getClassLoader();
-        Class<?> awemeCls = Class.forName(AWEME, false, cl);
-        Class<?> pagerCls = Class.forName(PAGER, false, cl);
+        Class<?> awemeCls = Class.forName(AWEME, false, activity.getClassLoader());
         View decor = activity.getWindow().getDecorView();
         int cx = decor.getWidth() / 2;
         int cy = decor.getHeight() / 2;
 
         List<View> pagers = new ArrayList<View>();
-        collect(decor, pagerCls, pagers);
-        // Later in traversal order means drawn on top.
+        collect(decor, cx, cy, pagers);
+        // Later in traversal order means nested deeper or drawn on top.
         for (int i = pagers.size() - 1; i >= 0; i--) {
-            View pager = pagers.get(i);
-            if (!covers(pager, cx, cy)) continue;
-            Object aweme = currentItem(pager, awemeCls);
+            Object aweme = currentItem(pagers.get(i), awemeCls);
             if (aweme != null) return aweme;
         }
         return scanUnder(decor, cx, cy, awemeCls);
     }
 
-    private static void collect(View v, Class<?> cls, List<View> out) {
-        if (cls.isInstance(v)) out.add(v);
-        if (v instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) v;
-            for (int i = 0; i < g.getChildCount(); i++) collect(g.getChildAt(i), cls, out);
+    private static void collect(View v, int x, int y, List<View> out) {
+        if (!(v instanceof ViewGroup) || !covers(v, x, y)) return;
+        if (isPager(v)) out.add(v);
+        ViewGroup g = (ViewGroup) v;
+        for (int i = 0; i < g.getChildCount(); i++) collect(g.getChildAt(i), x, y, out);
+    }
+
+    private static boolean isPager(View v) {
+        try {
+            v.getClass().getMethod("getCurrentItem");
+            v.getClass().getMethod("getAdapter");
+            return true;
+        } catch (NoSuchMethodException e) {
+            return false;
         }
     }
 

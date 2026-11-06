@@ -3,20 +3,16 @@ package com.rigaz.tgbtn;
 import android.app.Activity;
 import android.app.Application;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
-import android.widget.Toast;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.lang.ref.WeakReference;
 
 /**
  * Entry point called from the patched TikTok code.
  *
  * init(Application) is injected at the start of AwemeHostApplication.onCreate. It puts the
  * floating button on the feed and video-detail screens; a tap reads the Aweme on screen
- * (AwemeLocator) and posts its link to tikdl's intake (Submit).
+ * (AwemeLocator) and hands it to Jobs, which posts it to tikdl and reports the progress.
  */
 public final class Ttg {
     static final String LOG = "tgbtn";
@@ -24,14 +20,12 @@ public final class Ttg {
     private static final String[] HOST_ACTIVITIES = {
             "com.ss.android.ugc.aweme.main.MainActivity",
             "com.ss.android.ugc.aweme.detail.ui.DetailActivity",
+            "com.ss.android.ugc.aweme.story.feed.immersive.gallery.StoryGalleryActivity",
     };
 
-    private static final Handler MAIN = new Handler(Looper.getMainLooper());
-    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
-    private static volatile boolean busy;
     private static boolean installed;
-    private static String lastLink;
-    private static long lastSentAt;
+    private static int started;
+    private static WeakReference<Activity> host = new WeakReference<Activity>(null);
 
     private Ttg() {
     }
@@ -44,28 +38,38 @@ public final class Ttg {
             public void onActivityResumed(Activity a) {
                 if (!isHost(a)) return;
                 try {
+                    host = new WeakReference<Activity>(a);
                     FloatButton.attach(a);
-                    FloatButton.bringToFront(a);
-                    FloatButton.setBusy(a, busy);
+                    FloatButton.place(a);
+                    Jobs.render();
                 } catch (Throwable t) {
                     Log.w(LOG, "attach failed", t);
                 }
             }
 
             @Override
-            public void onActivityCreated(Activity a, Bundle b) {
+            public void onActivityPaused(Activity a) {
+                if (host.get() == a) host.clear();
             }
 
             @Override
             public void onActivityStarted(Activity a) {
-            }
-
-            @Override
-            public void onActivityPaused(Activity a) {
+                started++;
             }
 
             @Override
             public void onActivityStopped(Activity a) {
+                started--;
+                // Nothing left on screen means the app went to the background. The button is
+                // back at its default spot the next time the app is opened.
+                if (started <= 0 && !a.isChangingConfigurations()) {
+                    started = 0;
+                    FloatButton.resetPosition();
+                }
+            }
+
+            @Override
+            public void onActivityCreated(Activity a, Bundle b) {
             }
 
             @Override
@@ -79,61 +83,37 @@ public final class Ttg {
         Log.i(LOG, "installed");
     }
 
+    /** The screen the button is showing on right now, if any. */
+    static Activity host() {
+        return host.get();
+    }
+
+    /** Walks the superclasses: playlists, series and story pushes all subclass DetailActivity. */
     private static boolean isHost(Activity a) {
-        String name = a.getClass().getName();
-        for (String h : HOST_ACTIVITIES) {
-            if (h.equals(name)) return true;
+        for (Class<?> c = a.getClass(); c != null && c != Activity.class; c = c.getSuperclass()) {
+            for (String h : HOST_ACTIVITIES) {
+                if (h.equals(c.getName())) return true;
+            }
         }
         return false;
     }
 
-    static void onButtonClick(final Activity activity) {
-        if (busy) return;
-        final Post post;
+    static void onButtonClick(Activity activity) {
+        Post post;
         try {
             post = AwemeReader.read(AwemeLocator.find(activity));
         } catch (Throwable t) {
             Log.w(LOG, "read failed", t);
-            toast(activity, "Video tidak terbaca: " + t.getMessage());
+            String reason = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
+            Jobs.notice(new Notice("Tidak bisa dikirim", null, reason, Notice.FAIL, false));
             return;
         }
         if (post == null) {
-            toast(activity, "Tidak ada video di layar");
+            Jobs.notice(new Notice("Tidak ada video di layar", null, null, Notice.INFO, false));
             return;
         }
-        final String link = post.link;
-        long now = System.currentTimeMillis();
-        if (link.equals(lastLink) && now - lastSentAt < 15_000) {
-            toast(activity, "Video ini baru saja dikirim");
-            return;
-        }
-        busy = true;
-        FloatButton.setBusy(activity, true);
-        final Application app = activity.getApplication();
-        WORKER.execute(new Runnable() {
-            @Override
-            public void run() {
-                final String error = Submit.send(link);
-                if (error != null) Log.w(LOG, "submit failed for " + link + ": " + error);
-                MAIN.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        busy = false;
-                        FloatButton.setBusy(activity, false);
-                        if (error == null) {
-                            lastLink = link;
-                            lastSentAt = System.currentTimeMillis();
-                            toast(app, "Dikirim ke bot ✓ hasilnya muncul di grup");
-                        } else {
-                            toast(app, "Gagal kirim: " + error);
-                        }
-                    }
-                });
-            }
-        });
-    }
-
-    static void toast(android.content.Context ctx, String text) {
-        Toast.makeText(ctx.getApplicationContext(), text, Toast.LENGTH_SHORT).show();
+        Log.i(LOG, post.kind + " " + post.link + " media=" + (post.video != null ? "video"
+                : post.images != null ? post.images.size() + " images" : "none"));
+        Jobs.submit(post);
     }
 }

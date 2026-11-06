@@ -1,9 +1,9 @@
 # TikTok Telegram Button
 
-A floating button added inside the TikTok Android app. Tap it on any video or photo
-post and the link is sent to a self-hosted [tikdl](tikdl/) bot (bundled in this repo
+A floating button added inside the TikTok Android app. Tap it on any video, photo post or
+story and the link is sent to a self-hosted [tikdl](tikdl/) bot (bundled in this repo
 under `tikdl/`), which downloads the post and drops it into a Telegram group. No copy-paste, no
-leaving the app.
+leaving the app. A card next to the button follows the job until it is in the group.
 
 The button is a small Java module (`com.rigaz.tgbtn`) injected into a repackaged
 TikTok APK. It reads the post that is currently on screen through reflection, builds
@@ -14,17 +14,19 @@ the canonical web link, and POSTs it to the bot over a signed HTTP request.
 ```
  TikTok app (this module)                     Your VPS                     Telegram
  ────────────────────────                     ────────                     ────────
-  floating "TG" button
+  floating button
         │ tap
         ▼
   find Aweme on screen  ──┐
-  (VerticalViewPager +    │  reflection, no TikTok API calls
+  (innermost pager +      │  reflection, no TikTok API calls
    adapter.getItem())   ──┘
         │
         ▼
   build link, HMAC-sign  ──POST /submit──▶  tikdl intake  ──download──▶  group @...
   the body                 (X-Timestamp,     (yt-dlp / JS API)           (video/photo
                             X-Signature)                                  + caption)
+        │
+  status card  ◀──GET /status/<job>──  job progress
 ```
 
 Two halves, both in this repo:
@@ -42,7 +44,10 @@ The phone and the server share a secret (`SECRET` in `tg.properties`,
 The secret itself never goes on the wire, so TLS is not required to keep it safe. The
 server rejects anything unsigned, outside a 5-minute window, or replayed. See
 `Submit.java` here and the HTTP-intake section of `tikdl/CLAUDE.md` for the matching
-verification.
+verification. Status reads are signed the same way, over `status:<job>`.
+
+An observer on the network can still see which links you send, and the replies are not
+signed, so this protects the secret and the group rather than your privacy.
 
 ## Repo layout
 
@@ -51,14 +56,18 @@ src/com/rigaz/tgbtn/
   Ttg.java            entry point; init() is injected into AwemeHostApplication.onCreate.
                       Registers lifecycle callbacks and attaches the button on the feed
                       and video-detail screens; owns the click handler.
-  FloatButton.java    the 48dp draggable round "TG" button, drawn on the decor view.
-                      Remembers its position; turns amber while a send is in flight.
-  AwemeLocator.java   finds the Aweme object on screen via the VerticalViewPager and its
+  FloatButton.java    the draggable round button, drawn on the decor view with Canvas. Keeps
+                      clear of the system bars and shows idle, busy, done and failed states.
+  StatusBubble.java   the card next to the button that says what is happening to the post.
+  Jobs.java           follows each post from the tap until the server is done with it, and
+                      decides what the button and the card show.
+  AwemeLocator.java   finds the Aweme object on screen through the innermost pager and its
                       adapter, with a view-tree fallback. Resilient to obfuscation.
-  AwemeReader.java    reads aid / author.uniqueId / awemeType / shareUrl off the Aweme and
-                      builds the /video/ or /photo/ web link.
-  Submit.java         HMAC-signs the body and POSTs it to <SERVER_URL>/submit.
-  Post.java           tiny value holder (id + link).
+  AwemeReader.java    reads aid / author.uniqueId / awemeType / desc off the Aweme, builds
+                      the /video/ or /photo/ web link, and collects a story's direct media.
+  Submit.java         HMAC-signs requests: POST <SERVER_URL>/submit and GET /status/<job>.
+  Post.java           what is sent for one post.
+  Notice.java         what the card shows.
 
 patch_smali.py        injects one smali hook: Ttg.init(application) at the start of
                       AwemeHostApplication.onCreate. Keeps a .orig copy so reruns are clean.
@@ -168,12 +177,21 @@ Install the result; it launches, survives the anti-tamper check, and logs
 
 1. Make sure your tikdl bot is running and its intake is reachable
    (`GET <SERVER_URL>/health` returns `{"ok":true}`).
-2. Open TikTok, go to the For You feed. The draggable **TG** button appears (drag to
-   reposition; the spot is remembered).
-3. Tap it on a video or photo post. A toast confirms the send, and the post shows up in
-   the configured Telegram group a few seconds later.
+2. Open TikTok and go to the feed. The button appears on the right. Drag it anywhere
+   between the status bar and the navigation bar; it settles on the nearest side and stays
+   there until you leave the app. Opening the app again puts it back at its default spot.
+3. Tap it on a video, photo post or story. The card next to the button shows the job's
+   stage, then what arrived in the group, how big it is, how it was fetched and how long it
+   took. If the download fails, the card gives the reason and the link stays in the group
+   so you can retry. Tap the card to dismiss it.
 
-User-facing toasts are in Indonesian; code and comments are in English.
+Stories work too. A story's web link is enough most of the time; for the ones it cannot
+reach, the app also sends the story's direct media URLs and the server falls back to those.
+
+The card needs a tikdl that has `/status`. With an older bot the button still sends, and the
+card stops at "Terkirim ke server".
+
+User-facing text is in Indonesian; code and comments are in English.
 
 ## Security notes
 
