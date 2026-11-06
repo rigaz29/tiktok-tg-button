@@ -7,6 +7,7 @@ tg.properties
 *.apk
 *.dex
 *.class
+__pycache__/
 build/
 out/
 

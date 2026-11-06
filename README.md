@@ -62,7 +62,13 @@ src/com/rigaz/tgbtn/
 
 patch_smali.py        injects one smali hook: Ttg.init(application) at the start of
                       AwemeHostApplication.onCreate. Keeps a .orig copy so reruns are clean.
-build.sh              builds a modified APK end to end (see "Build — raw route" below).
+build-morphe.sh       builds the APK that actually launches (see "Patched route" below).
+build.sh              builds a modified APK without HushFeed (see "Raw route" below).
+build-common.sh       tool paths, module compile, align and sign; sourced by both builds.
+scripts/
+  morphe_inject.py    the APK steps of build-morphe.sh: find the hook's dex, build a one-dex
+                      APK for apktool, repack the result with the module added.
+  dexindex.py         indexes classes across dex files; also usable on its own.
 tg.properties.example copy to tg.properties and fill in SERVER_URL + SECRET.
 testapp/              a tiny mock app with stub Aweme / User / VerticalViewPager classes,
                       to exercise the locator/reader logic without TikTok.
@@ -96,7 +102,7 @@ values into the module dex; nothing secret is kept in source.
 The module itself is version-independent — it uses only reflection and survives TikTok's
 obfuscation. The hard part is getting a repackaged TikTok to actually launch, because
 modern TikTok kills itself when it detects a changed signature (anti-tamper). There are
-two routes.
+two routes. Both scripts are written for Git Bash on Windows (`cygpath`, `.exe` tools).
 
 ### Raw route (`build.sh`) — simple, but blocked by anti-tamper on recent builds
 
@@ -117,29 +123,43 @@ non-original key trips TikTok's signature check. Use this route only against a b
 no such check, or in combination with something that neutralizes it — which is the next
 route.
 
-### Patched route (Morphe + HushFeed) — runs on current TikTok
+### Patched route (`build-morphe.sh`) — runs on current TikTok
 
 [HushFeed](https://github.com/SysAdminDoc/hushfeed) is a Morphe/ReVanced-style patch
 bundle for TikTok. Its default "Look like the store app" patch neutralizes the
-anti-tamper, so a re-signed build launches normally. The idea is to let HushFeed produce
-a runnable TikTok and inject this module's dex alongside it.
+anti-tamper, so a re-signed build launches normally. `build-morphe.sh` lets HushFeed
+produce a runnable TikTok and adds this module to the result.
 
-Outline (tested on TikTok 47.6.3, Pixel 8):
+```sh
+WORK=/d/tt-build ./build-morphe.sh
+```
 
-1. Patch the TikTok bundle with Morphe + HushFeed, unsigned:
-   `java -jar morphe-desktop.jar patch <tiktok.apkm> --patches=<hushfeed.mpp> --unsigned -o tiktok-hushfeed-unsigned.apk`
-   (sign-on-patch can fail on JDK 21 with a BouncyCastle/JCE error — hence `--unsigned`,
-   then sign yourself with `apksigner` and your own key.)
-2. Find which dex HushFeed moved `AwemeHostApplication` into (it is not `classes.dex`
-   anymore). Any dex index tool works; this repo's history used `scripts/dexindex.py`.
-3. Patch that one dex's `onCreate` with `patch_smali.py` (via a small single-dex apktool
-   project, since the hook declaration is unchanged), and append the module dex as the
-   next `classesNN.dex`.
-4. `zipalign -P 16 -f 4`, then `apksigner sign` (v1+v2+v3) with your key.
+Requirements: everything the raw route needs except the 46.4.3 APK, plus the inputs
+below. Each one can be overridden through the environment.
+
+| Variable  | Default                                                   |
+|-----------|-----------------------------------------------------------|
+| `APKM`    | `com.zhiliaoapp.musically_47.6.3-*.apkm` next to the repo |
+| `MORPHE`  | `$WORK/morphe/morphe-desktop-1.20.0-all.jar`              |
+| `PATCHES` | `$WORK/morphe/patches-0.80.0.mpp`                         |
+| `OUT_APK` | `$WORK/morphe/tiktok-tgbtn-final.apk`                     |
+
+What it does:
+
+1. Compiles the module.
+2. Runs Morphe with `--unsigned`, because signing inside Morphe can fail on JDK 21 with a
+   BouncyCastle/JCE error. The result is kept as `tiktok-hushfeed-unsigned.apk` and reused
+   until the bundle or the patches change.
+3. Finds the dex that defines `AwemeHostApplication`. HushFeed changes that class, so it
+   ends up in a different dex than in the stock app, and the index can shift between
+   TikTok/HushFeed versions.
+4. Adds the hook to that one dex through a small single-dex apktool project, so the rest
+   of the app never has to be decoded.
+5. Repacks the APK with that dex replaced and the module appended as the next
+   `classesN.dex`, then aligns and signs it (v1+v2+v3) with `tgbtn.jks`.
 
 Install the result; it launches, survives the anti-tamper check, and logs
-`tgbtn: installed`. The only step that shifts between TikTok/HushFeed versions is the dex
-index in step 2.
+`tgbtn: installed`.
 
 > Installing a repackaged TikTok replaces the Play Store one (different signature), so the
 > existing login and drafts are lost. Expect to log in again.
@@ -165,6 +185,5 @@ User-facing toasts are in Indonesian; code and comments are in English.
 
 ## Status
 
-The build pipeline and the module are proven end to end on TikTok 47.6.3 (Pixel 8): the
-patched build launches and `Ttg.init` runs inside it. The server side (signed `/submit` →
-download → post to the group) is tested independently.
+Tested end to end on TikTok 47.6.3 (Pixel 8): the patched build launches, and a tap on the
+button gets the post downloaded and uploaded to the Telegram group.
